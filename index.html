@@ -1,0 +1,43 @@
+<html>
+
+<p><strong><span style="font-family:Arial,Helvetica,sans-serif">I scraped 25M Shopify products to build a search engine</span></strong></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">For context, last week I launched a project called&nbsp;<a href="https://www.searchagora.com/">Agora</a>&nbsp;on&nbsp;<a href="https://news.ycombinator.com/item?id=38635695">HackerNews</a>. I wanted to share more about the engineering process to get feedback from the community on how to improve it.</span></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">Once I came up with the idea for Agora (more on that in the HN post), I needed to find a way to scrape millions of Shopify products to make it useful. From the outset I was convinced not to do any front-end scraping with Selenium or an equivalent as any changes to Shopify&#39;s templates (i.e. HTML classes, etc.), would break the crawler. The&nbsp;margin of error was too high and would simply require too much maintenance.&nbsp;</span></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">After some quick digging into the console, I&nbsp;found that all Shopify stores have a public JSON file with product data available at [Base URL]/products.json. Here&#39;s an&nbsp;<a href="https://www.wildfox.com/products.json">example</a>.&nbsp;</span></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">There&#39;s another JSON file with general store data available at [Base URL]/meta.json. Here&#39;s an&nbsp;<a href="https://wildfox.com/meta.json">example</a>.&nbsp;</span></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">Then, I set up a Mongo database and Atlas Search with 2 Search Indexes: Store and Products. This was a process of trial-and-error: figuring out the minimum information we needed to show the user to make the product compelling, while the maximum data we can store to power the search experience without slowing down the servers. I ended up landing on the following fields: name, description, brand, country, currency, ship to countries, slug, price, tags (SEO tags that are added by store owners to improve visibility of their stores), store product ID, published at, last updated, and image URLs (more on that below).&nbsp;</span></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">To find the list of stores, I spent $300 to buy a list of 2 million Shopify stores on a website called &quot;<a href="https://builtwith.com/">Built With</a>&quot; (not associated with them, and there are plenty of other options online). I narrowed down the list to only the US and between $100k - $1 million in revenue. This narrowed down the list to 90,000 store URLs.&nbsp;</span></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">Then I wrote some simple Javascript to go store-by-store, find the 2 public JSON files, and extract the correct data into our Mongo database. I&#39;ll note that although it&#39;s a list of 90,000 &#39;stores&#39;, there ended up being about 650,000 &#39;brands within those stores. I didn&#39;t originally account for the crawler ingesting marketplaces built on Shopify that sell multiple brands. In the end, I had a data set of 25 million products.&nbsp;</span></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">I originally built the search engine using React. I quickly changed this to NextJS to make it easier to structure URLs of each product listing page (example&nbsp;<a href="https://www.searchagora.com/products/filthy-animal-christmas-sweatshirt-kevin-movie-christmas-sweater-ugly-christmas-sweater-unisex-crewneck-sweatshirt-ugly-christmas-sweater-unisex-crewneck-sweatshirt-4954ba30-23db-4370-8b1f-c0e46ffd6739">here</a>). After initially adding my own sign up authentication, I was forced to only have social login. I made a fatal mistake and didn&#39;t have any sort of email verification built in. After the HN launch, a few spammers signed up using fake accounts and wrote a script to &#39;like&#39; any product with &quot;dildo&quot; in the name. The home page &quot;most popular products&quot; section was filled with sex toys. And although I thought this may be an interesting use-case for a search engine like this, I realized it was just people messing with us. Only having social login made the barrier of entry for fake / bot users a lot higher.&nbsp;</span></p>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">A few things I&#39;ve done already to improve the performance:&nbsp;</span></p>
+
+<ol>
+	<li><span style="font-family:Arial,Helvetica,sans-serif">I ended up combining the &quot;Brand Name&quot; and &quot;Product Name&quot; into a single data field within Mongo to improve the search speed. With 25 million products, I noticed a few hundred millisecond improvement by combining the fields.&nbsp;</span></li>
+	<li><span style="font-family:Arial,Helvetica,sans-serif">Implemented Redis for caching certain search results to improve the second-time user experience. By storing results locally, I find that we can improve the user experience&nbsp;</span></li>
+	<li><span style="font-family:Arial,Helvetica,sans-serif">Worked with the team at Mongo to upgrade the infrastructure to lower our monthly&nbsp;bill. Specifically, rather than using a higher Cluster Tier, we&#39;re now using what is called &quot;<a href="https://www.mongodb.com/blog/post/search-nodes-now-public-preview-performance-scale-dedicated-infrastructure">Search Nodes</a>&quot;. For anyone curious, we&#39;re on M50 (32 GB RAM, 1000 GB Storage) and Search S50 (32 GB RAM, 200 GB Storage).&nbsp;</span></li>
+	<li><span style="font-family:Arial,Helvetica,sans-serif">Currently, the product images are loading dynamically from the Shopify servers. I&#39;m in the process of storing all of the images myself in an AWS S3 bucket. I am using a crawler to download the images associated with each product and then converting them all into WebP format. In the future, I want to do semantic image search to understand what&#39;s in the images to improve the browsing experience (i.e. it would be helpful to know what type of images do the best with front-end engagement).&nbsp;</span></li>
+</ol>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">The primary challenges in front&nbsp;of me now:&nbsp;</span></p>
+
+<ol>
+	<li><span style="font-family:Arial,Helvetica,sans-serif">Search Relevancy: Speaking candidly, the search algorithm&nbsp;barely works. It&#39;s a homemade&nbsp;script that uses a simple ranking system primarily based on the &#39;name&#39; field (which includes both the product and brand name now). Looking into options including&nbsp;Meiliasearch&nbsp;to power the search experience as we get off the ground. Related, I&#39;d like to figure out a sustainable way to handle both search intent and misspelling.&nbsp;</span></li>
+	<li><span style="font-family:Arial,Helvetica,sans-serif">Loading Speed: Hackernews brought us over 100k hits and thousands of registered users. I had initially&nbsp;built Agora as a very simple NextJS app, so I didn&#39;t take a lot of loading experiences into account. Additionally, Mongo Atlas Search doesn&#39;t seem to be a sustainable solution on it&#39;s own. The cost is prohibitive during times of peak usage as it can go up to $5 / hour.&nbsp;</span></li>
+	<li><span style="font-family:Arial,Helvetica,sans-serif">Data Quality: There are lots of duplicates, websites that return 404, active stores with sold out products, etc. Trying to come up with creative ways to keep the data set as clean as possible.&nbsp;</span></li>
+</ol>
+
+<p><span style="font-family:Arial,Helvetica,sans-serif">Let me know if you have any suggestions or feedback. Open to any ideas, as this is all new to me. The further I get with this project, the less I feel like I know.&nbsp;</span></p>
+
+<p>&nbsp;</p>
+
+</html>
+
